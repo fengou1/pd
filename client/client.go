@@ -57,6 +57,8 @@ type GlobalConfigItem struct {
 // Client is a PD (Placement Driver) client.
 // It should not be used after calling Close().
 type Client interface {
+	// GetAllocID gets the alloc ID from PD.
+	GetAllocID(ctx context.Context) (uint64, error)
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
 	// GetAllMembers gets the members Info from PD
@@ -1245,6 +1247,27 @@ var tsoReqPool = sync.Pool{
 			logical:  0,
 		}
 	},
+}
+
+// GetAllocID gets the alloc ID from PD.
+func (c *client) GetAllocID(ctx context.Context) (uint64, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetAllocID", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+
+	req := &pdpb.AllocIDRequest{
+		Header:      c.requestHeader(),
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	resp, err := c.getClient().AllocID(ctx, req)
+	cancel()
+	if err != nil {
+		c.ScheduleCheckLeader()
+		return 0, errors.WithStack(err)
+	}
+	return resp.GetId(), nil
 }
 
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
