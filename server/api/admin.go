@@ -61,6 +61,7 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusOK, "The region is removed from server cache.")
 }
 
+// ResetTS
 // FIXME: details of input json body params
 // @Tags     admin
 // @Summary  Reset the ts.
@@ -72,6 +73,11 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 // @Failure  403  {string}  string  "Reset ts is forbidden."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /admin/reset-ts [post]
+// if force-use-larger=true:
+//		reset ts to max(current ts, input ts).
+// else:
+//		reset ts to input ts if it > current ts and < upper bound, error if not in that range
+// during EBS based restore, we call this to make sure ts of pd >= resolved_ts in backup.
 func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	var input map[string]interface{}
@@ -89,7 +95,15 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err = handler.ResetTS(ts); err != nil {
+	forceUseLarger, ok := input["force-use-larger"].(bool)
+	var ignoreSmaller, skipUpperBoundCheck bool
+	if forceUseLarger {
+		ignoreSmaller, skipUpperBoundCheck = true, true
+	} else {
+		ignoreSmaller, skipUpperBoundCheck = false, false
+	}
+
+	if err = handler.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck); err != nil {
 		if err == server.ErrServerNotStarted {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {
@@ -173,6 +187,8 @@ func (h *adminHandler) GetAllocID(w http.ResponseWriter, r *http.Request) {
 	_ = h.rd.JSON(w, http.StatusOK, &resStruct{Id: resp.GetId()})
 }
 
+// RecoverAllocID recover base alloc id
+// body should be in {"id": "123"} format
 func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
@@ -180,7 +196,7 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 	}
 	idValue, ok := input["id"].(string)
 	if !ok || len(idValue) == 0 {
-		_ = h.rd.JSON(w, http.StatusBadRequest, "invalid id value")
+		_ = h.rd.Text(w, http.StatusBadRequest, "invalid id value")
 		return
 	}
 	newId, err := strconv.ParseUint(idValue, 10, 64)
@@ -215,5 +231,5 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
 	}
 
-	_ = h.rd.JSON(w, http.StatusOK, "")
+	_ = h.rd.Text(w, http.StatusOK, "")
 }
