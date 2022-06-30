@@ -447,6 +447,47 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	}, nil
 }
 
+// GetAllocID implements gRPC PDServer.
+func (s *GrpcServer) GetAllocID(ctx context.Context, request *pdpb.GetAllocIDRequest) (*pdpb.GetAllocIDResponse, error) {
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
+		return pdpb.NewPDClient(client).GetAllocID(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.GetAllocIDResponse), err
+	}
+
+	id := s.idAllocator.Base()
+
+	return &pdpb.GetAllocIDResponse{
+		Header: s.header(),
+		Id:     id,
+	}, nil
+}
+
+// RecoverAllocID implements gRPC PDServer.
+func (s *GrpcServer) RecoverAllocID(ctx context.Context, request *pdpb.RecoverAllocIDRequest) (*pdpb.RecoverAllocIDResponse, error) {
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
+		return pdpb.NewPDClient(client).RecoverAllocID(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.RecoverAllocIDResponse), err
+	}
+
+	// We can use an allocator for all types ID allocation.
+	err := s.idAllocator.SetBase(request.Id)
+	if err != nil {
+		return nil, status.Errorf(codes.Unknown, err.Error())
+	}
+
+	return &pdpb.RecoverAllocIDResponse{
+		Header: s.header(),
+	}, nil
+}
+
 // GetStore implements gRPC PDServer.
 func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {

@@ -29,6 +29,11 @@ import (
 
 // Allocator is the allocator to generate unique ID.
 type Allocator interface {
+	// Base get current base id
+	// only called during br ebs backup right now
+	Base() uint64
+	// SetBase set base id
+	SetBase(newBase uint64) error
 	// Alloc allocs a unique id.
 	Alloc() (uint64, error)
 	// Rebase resets the base for the allocator from the persistent window boundary,
@@ -41,7 +46,7 @@ const allocStep = uint64(1000)
 
 // allocatorImpl is used to allocate ID.
 type allocatorImpl struct {
-	mu   syncutil.Mutex
+	mu   syncutil.RWMutex
 	base uint64
 	end  uint64
 
@@ -61,7 +66,7 @@ func (alloc *allocatorImpl) Alloc() (uint64, error) {
 	defer alloc.mu.Unlock()
 
 	if alloc.base == alloc.end {
-		if err := alloc.rebaseLocked(); err != nil {
+		if err := alloc.rebaseLocked(true); err != nil {
 			return 0, err
 		}
 	}
@@ -71,6 +76,22 @@ func (alloc *allocatorImpl) Alloc() (uint64, error) {
 	return alloc.base, nil
 }
 
+func (alloc *allocatorImpl) Base() uint64 {
+	alloc.mu.RLock()
+	defer alloc.mu.RUnlock()
+	return alloc.base
+}
+
+func (alloc *allocatorImpl) SetBase(newBase uint64) error {
+	alloc.mu.Lock()
+	defer alloc.mu.Unlock()
+
+	// set current end to new base, rebaseLocked will change it later.
+	alloc.end = newBase
+
+	return alloc.rebaseLocked(false)
+}
+
 // Rebase resets the base for the allocator from the persistent window boundary,
 // which also resets the end of the allocator. (base, end) is the range that can
 // be allocated in memory.
@@ -78,40 +99,43 @@ func (alloc *allocatorImpl) Rebase() error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
-	return alloc.rebaseLocked()
+	return alloc.rebaseLocked(true)
 }
 
-func (alloc *allocatorImpl) rebaseLocked() error {
+func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 	key := alloc.getAllocIDPath()
-	value, err := etcdutil.GetValue(alloc.client, key)
-	if err != nil {
-		return err
-	}
 
+	leaderPath := path.Join(alloc.rootPath, "leader")
 	var (
-		cmp clientv3.Cmp
-		end uint64
+		cmps = []clientv3.Cmp{clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member)}
+		end  uint64
 	)
 
-	if value == nil {
-		// create the key
-		cmp = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
-	} else {
-		// update the key
-		end, err = typeutil.BytesToUint64(value)
+	if checkCurrEnd {
+		value, err := etcdutil.GetValue(alloc.client, key)
 		if err != nil {
 			return err
 		}
+		if value == nil {
+			// create the key
+			cmps = append(cmps, clientv3.Compare(clientv3.CreateRevision(key), "=", 0))
+		} else {
+			// update the key
+			end, err = typeutil.BytesToUint64(value)
+			if err != nil {
+				return err
+			}
 
-		cmp = clientv3.Compare(clientv3.Value(key), "=", string(value))
+			cmps = append(cmps, clientv3.Compare(clientv3.Value(key), "=", string(value)))
+		}
+	} else {
+		end = alloc.end
 	}
 
 	end += allocStep
-	value = typeutil.Uint64ToBytes(end)
+	value := typeutil.Uint64ToBytes(end)
 	txn := kv.NewSlowLogTxn(alloc.client)
-	leaderPath := path.Join(alloc.rootPath, "leader")
-	t := txn.If(append([]clientv3.Cmp{cmp}, clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member))...)
-	resp, err := t.Then(clientv3.OpPut(key, string(value))).Commit()
+	resp, err := txn.If(cmps...).Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByArgs()
 	}
@@ -119,10 +143,10 @@ func (alloc *allocatorImpl) rebaseLocked() error {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 
-	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
 	idallocGauge.Set(float64(end))
 	alloc.end = end
 	alloc.base = end - allocStep
+	log.Info("rebase id allocator", zap.Uint64("new-base", alloc.base), zap.Uint64("new-end", alloc.end))
 	return nil
 }
 

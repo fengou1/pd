@@ -78,9 +78,10 @@ const (
 	serverMetricsInterval = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
-	pdRootPath      = "/pd"
-	pdAPIPrefix     = "/pd/"
-	pdClusterIDPath = "/pd/cluster_id"
+	pdRootPath           = "/pd"
+	pdAPIPrefix          = "/pd/"
+	pdClusterIDPath      = "/pd/cluster_id"
+	pdRecoveringMarkPath = "/pd/recovering-mark"
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -1597,4 +1598,40 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 		}
 	}
 	return false
+}
+
+// MarkRecovering mark pd that we're recovering
+// tikv will get this state during BR EBS restore.
+func (s *Server) MarkRecovering() error {
+	log.Info("mark recovering")
+	// the value doesn't matter, set to a static string
+	_, err := kv.NewSlowLogTxn(s.client).
+		If(clientv3.Compare(clientv3.CreateRevision(pdRecoveringMarkPath), "=", 0)).
+		Then(clientv3.OpPut(pdRecoveringMarkPath, "on")).
+		Commit()
+	if err != nil {
+		return err
+	}
+	// if other client already marked, return success too
+	return nil
+}
+
+// IsRecoveringMarked check whether recovering-mark marked
+func (s *Server) IsRecoveringMarked(ctx context.Context) (bool, error) {
+	resp, err := s.client.Get(ctx, pdRecoveringMarkPath)
+	if err != nil {
+		return false, err
+	}
+	return len(resp.Kvs) > 0, nil
+}
+
+// UnmarkRecovering unmark recovering mark
+func (s *Server) UnmarkRecovering(ctx context.Context) error {
+	log.Info("unmark recovering")
+	_, err := s.client.Delete(ctx, pdRecoveringMarkPath)
+	if err != nil {
+		return err
+	}
+	// if other client already unmarked, return success too
+	return nil
 }

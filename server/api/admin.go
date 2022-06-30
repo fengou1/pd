@@ -21,7 +21,10 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -115,4 +118,102 @@ func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.rd.Text(w, http.StatusOK, "")
+}
+
+func (h *adminHandler) MarkRecovering(w http.ResponseWriter, r *http.Request) {
+	if err := h.svr.MarkRecovering(); err != nil {
+		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = h.rd.Text(w, http.StatusOK, "")
+}
+
+func (h *adminHandler) IsRecoveringMarked(w http.ResponseWriter, r *http.Request) {
+	marked, err := h.svr.IsRecoveringMarked(r.Context())
+	if err != nil {
+		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	type resStruct struct {
+		Marked bool `json:"marked"`
+	}
+	_ = h.rd.JSON(w, http.StatusOK, &resStruct{Marked: marked})
+}
+
+func (h *adminHandler) UnmarkRecovering(w http.ResponseWriter, r *http.Request) {
+	if err := h.svr.UnmarkRecovering(r.Context()); err != nil {
+		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = h.rd.Text(w, http.StatusOK, "")
+}
+
+func (h *adminHandler) GetAllocID(w http.ResponseWriter, r *http.Request) {
+	leader := h.svr.GetLeader()
+	if leader == nil {
+		_ = h.rd.Text(w, http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
+		return
+	}
+
+	ctx := grpcutil.BuildForwardContext(r.Context(), leader.ClientUrls[0])
+	req := &pdpb.GetAllocIDRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: h.svr.ClusterID(),
+		},
+	}
+	grpcServer := &server.GrpcServer{Server: h.svr}
+	resp, err := grpcServer.GetAllocID(ctx, req)
+	if err != nil {
+		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+	}
+
+	type resStruct struct {
+		Id uint64 `json:"id"`
+	}
+	_ = h.rd.JSON(w, http.StatusOK, &resStruct{Id: resp.GetId()})
+}
+
+func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	idValue, ok := input["id"].(string)
+	if !ok || len(idValue) == 0 {
+		_ = h.rd.JSON(w, http.StatusBadRequest, "invalid id value")
+		return
+	}
+	newId, err := strconv.ParseUint(idValue, 10, 64)
+	if err != nil {
+		_ = h.rd.Text(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	marked, err := h.svr.IsRecoveringMarked(r.Context())
+	if err != nil {
+		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !marked {
+		_ = h.rd.Text(w, http.StatusForbidden, "can only recover alloc id when recovering mark marked")
+		return
+	}
+
+	leader := h.svr.GetLeader()
+	if leader == nil {
+		_ = h.rd.Text(w, http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
+		return
+	}
+	ctx := grpcutil.BuildForwardContext(r.Context(), leader.ClientUrls[0])
+	req := &pdpb.RecoverAllocIDRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: h.svr.ClusterID(),
+		},
+		Id: newId,
+	}
+	grpcServer := &server.GrpcServer{Server: h.svr}
+	if _, err = grpcServer.RecoverAllocID(ctx, req); err != nil {
+		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+	}
+
+	_ = h.rd.JSON(w, http.StatusOK, "")
 }

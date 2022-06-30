@@ -279,8 +279,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	adminHandler := newAdminHandler(svr, rd)
 	registerFunc(clusterRouter, "/admin/cache/region/{id}", adminHandler.DeleteRegionCache, setMethods("DELETE"), setAuditBackend(localLog))
-	registerFunc(clusterRouter, "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/admin/recovering-mark", adminHandler.IsRecoveringMarked, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/admin/recovering-mark", adminHandler.MarkRecovering, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/admin/recovering-mark", adminHandler.UnmarkRecovering, setMethods("DELETE"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/admin/base-alloc-id", adminHandler.GetAllocID, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/admin/base-alloc-id", adminHandler.RecoverAllocID, setMethods("POST"), setAuditBackend(localLog))
 
 	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.GetServiceMiddlewareConfig, setMethods("GET"))
