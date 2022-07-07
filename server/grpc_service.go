@@ -488,6 +488,19 @@ func (s *GrpcServer) RecoverAllocID(ctx context.Context, request *pdpb.RecoverAl
 	}, nil
 }
 
+// IsRecoveringMarked implements gRPC PDServer.
+func (s *GrpcServer) IsRecoveringMarked(ctx context.Context, request *pdpb.IsRecoveringMarkedRequest) (*pdpb.IsRecoveringMarkedResponse, error) {
+	// recovering mark is stored in etcd directly, there's no need to forward.
+	marked, err := s.Server.IsRecoveringMarked(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unknown, err.Error())
+	}
+	return &pdpb.IsRecoveringMarkedResponse{
+		Header: s.header(),
+		Marked: marked,
+	}, nil
+}
+
 // GetStore implements gRPC PDServer.
 func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {

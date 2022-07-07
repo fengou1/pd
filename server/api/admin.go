@@ -95,7 +95,13 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	forceUseLarger, ok := input["force-use-larger"].(bool)
+	forceUseLarger := false
+	forceUseLargerVal, contains := input["force-use-larger"]
+	if contains {
+		if forceUseLarger, ok = forceUseLargerVal.(bool); !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "invalid force-use-larger value")
+		}
+	}
 	var ignoreSmaller, skipUpperBoundCheck bool
 	if forceUseLarger {
 		ignoreSmaller, skipUpperBoundCheck = true, true
