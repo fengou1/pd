@@ -57,4 +57,4 @@ require (
 	gotest.tools/gotestsum v1.7.0
 )
 
-replace github.com/pingcap/kvproto v0.0.0-20220510035547-0e2f26c0a46a => github.com/D3Hunter/kvproto v0.0.0-20220707023230-219f23892505
+replace github.com/pingcap/kvproto v0.0.0-20220510035547-0e2f26c0a46a => github.com/pingcap/kvproto v0.0.0-20220713113159-7c07175fa2e4
