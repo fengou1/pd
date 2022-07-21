@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/proto" //nolint:staticcheck
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -78,9 +78,13 @@ const (
 	serverMetricsInterval = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
-	pdRootPath           = "/pd"
-	pdAPIPrefix          = "/pd/"
-	pdClusterIDPath      = "/pd/cluster_id"
+	pdRootPath      = "/pd"
+	pdAPIPrefix     = "/pd/"
+	pdClusterIDPath = "/pd/cluster_id"
+	// idAllocPath for idAllocator to save persistent window's end.
+	idAllocPath  = "alloc_id"
+	idAllocLabel = "idalloc"
+
 	pdRecoveringMarkPath = "/pd/recovering-mark"
 )
 
@@ -382,7 +386,13 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
-	s.idAllocator = id.NewAllocator(s.client, s.rootPath, s.member.MemberValue())
+	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
+		Client:    s.client,
+		RootPath:  s.rootPath,
+		AllocPath: idAllocPath,
+		Label:     idAllocLabel,
+		Member:    s.member.MemberValue(),
+	})
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
 		s.member, s.rootPath, s.cfg,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
@@ -1518,19 +1528,14 @@ func (s *Server) reloadConfigFromKV() error {
 		return err
 	}
 	s.loadRateLimitConfig()
-	switchableStorage, ok := s.storage.(interface {
-		SwitchToRegionStorage()
-		SwitchToDefaultStorage()
-	})
-	if !ok {
-		return nil
-	}
-	if s.persistOptions.IsUseRegionStorage() {
-		switchableStorage.SwitchToRegionStorage()
-		log.Info("server enable region storage")
-	} else {
-		switchableStorage.SwitchToDefaultStorage()
-		log.Info("server disable region storage")
+	useRegionStorage := s.persistOptions.IsUseRegionStorage()
+	regionStorage := storage.TrySwitchRegionStorage(s.storage, useRegionStorage)
+	if regionStorage != nil {
+		if useRegionStorage {
+			log.Info("server enable region storage")
+		} else {
+			log.Info("server disable region storage")
+		}
 	}
 	return nil
 }
