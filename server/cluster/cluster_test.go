@@ -599,7 +599,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	err = cluster.processRegionHeartbeat(region)
 	re.NoError(err)
 	// wait HotStat to update items
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	stats := cluster.hotStat.RegionStats(statistics.Write, 0)
 	re.Len(stats[1], 1)
 	re.Len(stats[2], 1)
@@ -612,7 +612,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	err = cluster.processRegionHeartbeat(region)
 	re.NoError(err)
 	// wait HotStat to update items
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	stats = cluster.hotStat.RegionStats(statistics.Write, 0)
 	re.Len(stats[1], 1)
 	re.Empty(stats[2])
@@ -1682,7 +1682,7 @@ func Test(t *testing.T) {
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
 	}
 
-	pendingFilter := filter.NewRegionPengdingFilter()
+	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	for i := uint64(0); i < n; i++ {
 		region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)

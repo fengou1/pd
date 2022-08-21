@@ -462,55 +462,16 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	}, nil
 }
 
-// GetAllocID implements gRPC PDServer.
-func (s *GrpcServer) GetAllocID(ctx context.Context, request *pdpb.GetAllocIDRequest) (*pdpb.GetAllocIDResponse, error) {
-	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
-		return pdpb.NewPDClient(client).GetAllocID(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.GetAllocIDResponse), err
-	}
-
-	id := s.idAllocator.Base()
-
-	return &pdpb.GetAllocIDResponse{
-		Header: s.header(),
-		Id:     id,
-	}, nil
-}
-
-// RecoverAllocID implements gRPC PDServer.
-func (s *GrpcServer) RecoverAllocID(ctx context.Context, request *pdpb.RecoverAllocIDRequest) (*pdpb.RecoverAllocIDResponse, error) {
-	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
-		return pdpb.NewPDClient(client).RecoverAllocID(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.RecoverAllocIDResponse), err
-	}
-
-	// We can use an allocator for all types ID allocation.
-	err := s.idAllocator.SetBase(request.Id)
-	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
-	}
-
-	return &pdpb.RecoverAllocIDResponse{
-		Header: s.header(),
-	}, nil
-}
-
-// IsRecoveringMarked implements gRPC PDServer.
-func (s *GrpcServer) IsRecoveringMarked(ctx context.Context, request *pdpb.IsRecoveringMarkedRequest) (*pdpb.IsRecoveringMarkedResponse, error) {
+// IsSnapshotRecovering implements gRPC PDServer.
+func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, request *pdpb.IsSnapshotRecoveringRequest) (*pdpb.IsSnapshotRecoveringResponse, error) {
 	// recovering mark is stored in etcd directly, there's no need to forward.
-	marked, err := s.Server.IsRecoveringMarked(ctx)
+	marked, err := s.Server.IsSnapshotRecovering(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+		return &pdpb.IsSnapshotRecoveringResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
 	}
-	return &pdpb.IsRecoveringMarkedResponse{
+	return &pdpb.IsSnapshotRecoveringResponse{
 		Header: s.header(),
 		Marked: marked,
 	}, nil
@@ -799,10 +760,20 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 	}()
 	for {
 		request, err := server.Recv()
+		failpoint.Inject("grpcClientClosed", func() {
+			err = status.Error(codes.Canceled, "grpc client closed")
+			request = nil
+		})
 		if err == io.EOF {
 			return nil
 		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
 		forwardedHost := getForwardedHost(stream.Context())
+		failpoint.Inject("grpcClientClosed", func() {
+			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
+		})
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
@@ -1544,6 +1515,9 @@ func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 }
 
 func (s *GrpcServer) header() *pdpb.ResponseHeader {
+	if s.clusterID == 0 {
+		return s.wrapErrorToHeader(pdpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
+	}
 	return &pdpb.ResponseHeader{ClusterId: s.clusterID}
 }
 
@@ -1828,6 +1802,9 @@ func getForwardedHost(ctx context.Context) string {
 }
 
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
+	failpoint.Inject("useForwardRequest", func() {
+		failpoint.Return(false)
+	})
 	if forwardedHost == "" {
 		return true
 	}

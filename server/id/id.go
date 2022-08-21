@@ -178,8 +178,10 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 	alloc.metrics.idGauge.Set(float64(end))
 	alloc.end = end
 	alloc.base = end - alloc.step
-	log.Info("rebase id allocator", zap.String("label", alloc.label),
-		zap.Uint64("new-base", alloc.base), zap.Uint64("new-end", alloc.end))
+	// please do not reorder the first field, it's need when getting the new-end
+	// see: https://docs.pingcap.com/tidb/dev/pd-recover#get-allocated-id-from-pd-log
+	log.Info("idAllocator allocates a new id", zap.Uint64("new-end", end), zap.Uint64("new-base", alloc.base),
+		zap.String("label", alloc.label), zap.Bool("check-curr-end", checkCurrEnd))
 	return nil
 }
 

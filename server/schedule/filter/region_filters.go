@@ -54,15 +54,15 @@ type RegionFilter interface {
 	Select(region *core.RegionInfo) plan.Status
 }
 
-type regionPengdingFilter struct {
+type regionPendingFilter struct {
 }
 
-// NewRegionPengdingFilter creates a RegionFilter that filters all regions with pending peers.
-func NewRegionPengdingFilter() RegionFilter {
-	return &regionPengdingFilter{}
+// NewRegionPendingFilter creates a RegionFilter that filters all regions with pending peers.
+func NewRegionPendingFilter() RegionFilter {
+	return &regionPendingFilter{}
 }
 
-func (f *regionPengdingFilter) Select(region *core.RegionInfo) plan.Status {
+func (f *regionPendingFilter) Select(region *core.RegionInfo) plan.Status {
 	if hasPendingPeers(region) {
 		return statusRegionPendingPeer
 	}
@@ -96,7 +96,7 @@ func NewRegionReplicatedFilter(cluster regionHealthCluster) RegionFilter {
 func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
 	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
 		if !isRegionPlacementRuleSatisfied(f.cluster, region) {
-			return statusRegionRule
+			return statusRegionNotMatchRule
 		}
 		return statusOK
 	}

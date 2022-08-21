@@ -921,10 +921,10 @@ func (h *Handler) GetOfflinePeer(typ statistics.RegionStatisticType) ([]*core.Re
 
 // ResetTS resets the ts with specified tso.
 func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
-	log.Info("reset ts",
-		zap.Uint64("new ts", ts),
-		zap.Bool("ignore smaller", ignoreSmaller),
-		zap.Bool("skip upper bound check", skipUpperBoundCheck))
+	log.Info("reset-ts",
+		zap.Uint64("new-ts", ts),
+		zap.Bool("ignore-smaller", ignoreSmaller),
+		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck))
 	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		return err
@@ -1037,23 +1037,14 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 			if err != nil {
 				return nil, err
 			}
-			var peerID uint64
-			var isLearner bool
-			for _, peer := range meta.Peers {
-				if peer.StoreId == hotPeerStat.StoreID {
-					peerID = peer.Id
-					isLearner = core.IsLearner(peer)
-					break
-				}
-			}
 			stat := storage.HistoryHotRegion{
 				// store in ms.
 				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
-				PeerID:         peerID,
-				IsLeader:       peerID == region.GetLeader().Id,
-				IsLearner:      isLearner,
+				PeerID:         region.GetStorePeer(hotPeerStat.StoreID).GetId(),
+				IsLeader:       hotPeerStat.IsLeader,
+				IsLearner:      hotPeerStat.IsLearner,
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
 				KeyRate:        hotPeerStat.KeyRate,
